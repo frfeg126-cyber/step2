@@ -643,7 +643,7 @@ export async function performExtraction(
   const memoryInfo = pageMemory.size > 0 ? 
     `\n\nPage memory: ${Array.from(pageMemory.entries()).map(([p, content]) => `Page ${p}: ${content.slice(0, 200)}`).join('\n')}` : '';
 
-  const prompt = `You are an expert at extracting questions from academic exam papers. Analyze this page image and extract ALL questions with perfect accuracy.
+  const prompt = `You are an expert at extracting questions from academic exam papers AND generating Excalidraw diagram JSONs. Analyze this page image and extract ALL questions with perfect accuracy.
 
 CRITICAL INSTRUCTIONS FOR LATEX/KATEX:
 1. ALL mathematical expressions MUST be wrapped in $ for inline math or $$ for display math
@@ -660,12 +660,39 @@ CRITICAL INSTRUCTIONS FOR LATEX/KATEX:
 4. NEVER write things like "\\backslashhat" or "Δackslash" - use $\\hat{x}$ or $\\Delta$ instead
 5. Every mathematical symbol, variable, or expression must be in LaTeX format
 
+CRITICAL INSTRUCTIONS FOR DIAGRAMS (EXCALIDRAW JSON):
+When you encounter ANY visual element (diagram, circuit, graph, table, chart, structure), you MUST generate an Excalidraw JSON array representing it.
+
+Excalidraw Element Types:
+1. RECTANGLE: {"x":100, "y":50, "id":"rect-1", "type":"rectangle", "width":80, "height":60, "strokeColor":"#000000", "backgroundColor":"#e0f2fe"}
+2. ELLIPSE/CIRCLE: {"x":100, "y":50, "id":"circle-1", "type":"ellipse", "width":50, "height":50, "strokeColor":"#000000", "backgroundColor":"#fff"}
+3. LINE/ARROW: {"x":100, "y":50, "id":"line-1", "type":"line", "points":[[0,0],[100,50]], "strokeColor":"#000000", "strokeWidth":2}
+4. TEXT: {"x":100, "y":50, "text":"Label", "type":"text", "fontSize":16, "fontFamily":1, "strokeColor":"#000000"}
+
+How to Generate Diagrams:
+- CIRCUITS: Use rectangles for resistors, circles for bulbs, lines for wires, text for labels (R1, V, etc.)
+- CHEMISTRY: Use circles for atoms, lines for bonds, text for element symbols (C, H, O, etc.)
+- GRAPHS: Use lines for axes, lines/curves for plots, text for labels
+- TREES: Use circles/ellipses for nodes, lines for edges, text for node values
+- VENN DIAGRAMS: Use ellipses for sets, text for labels
+- TABLES: Use rectangles for cells, text for content
+- MECHANICAL: Use shapes for components, lines for connections, text for labels
+
+Positioning Guidelines:
+- Start from x:50-100, y:50-100 for visibility
+- Space elements 50-100 pixels apart
+- Keep diagrams within 600x400 size for readability
+- Use consistent colors: #000000 (black) for strokes, #e0f2fe (light blue) for fills
+
 EXTRACTION INSTRUCTIONS:
 1. Extract EVERY question from this page, no matter how small or partial
 2. For each question, determine the correct question type: MCQ, MSQ, NAT, or Subjective
 3. Extract ONLY the question statement and options - DO NOT extract answers or solutions
 4. Extract all options exactly as written with proper LaTeX for all math
-5. If there are diagrams, charts, or images, describe them clearly
+5. If there are diagrams/circuits/graphs/tables/images:
+   - Generate Excalidraw JSON for the main question diagram (diagram_json field)
+   - Generate Excalidraw JSON for EACH option if options have diagrams (options_diagrams array)
+   - Keep text in question_statement describing what the diagram shows
 6. Handle multi-page questions by noting continuation
 7. ALL mathematical content must use proper LaTeX syntax wrapped in $ or $$
 
@@ -676,48 +703,79 @@ Question Type Guidelines:
 - Subjective: Descriptive/essay type questions (no options)
 
 IMPORTANT - What to Extract:
-✅ DO Extract: Question statement, options (A, B, C, D), question number, diagrams/images description
+✅ DO Extract: Question statement, options (A, B, C, D), question number, diagrams as Excalidraw JSON
 ❌ DO NOT Extract: Answers, solutions, explanations, answer keys
-
-For Images/Diagrams in Questions:
-- If there's a mathematical diagram: Describe it clearly (e.g., "A circle with center O and radius r")
-- If there's a graph: Describe axes, curves, points (e.g., "Graph showing y = x^2 with vertex at origin")
-- If there's a circuit: Describe components and connections
-- If there's a Venn diagram: Describe sets and their relationships
-- Use LaTeX notation for mathematical elements when possible
 
 ${contextInfo}${memoryInfo}
 
 Return a JSON array of questions in this exact format:
 [
   {
-    "question_statement": "Complete question text with all mathematical notation in LaTeX format. [IMAGE: description if present]",
+    "question_statement": "Complete question text with all mathematical notation in LaTeX format. Describe what the diagram shows.",
     "question_type": "MCQ|MSQ|NAT|Subjective",
     "options": ["Option A text", "Option B text", "Option C text", "Option D text"] or null for NAT/Subjective,
     "question_number": "Question number if visible",
     "has_image": true/false,
-    "image_description": "Detailed description of diagram/figure in the question",
+    "image_description": "Brief description of diagram type",
+    "diagram_json": [Excalidraw elements array] or null if no diagram,
+    "options_diagrams": [[Excalidraw for option A], [Excalidraw for option B], [Excalidraw for option C], [Excalidraw for option D]] or null,
     "is_continuation": true/false,
     "spans_multiple_pages": true/false
   }
 ]
 
-EXAMPLE OUTPUT:
+EXAMPLE OUTPUT (Circuit Question):
 [
   {
-    "question_statement": "A circle with center O has radius 5 cm. [IMAGE: Circle with center O, radius r, and point P on circumference]. If point P is on the circumference, what is the area?",
+    "question_statement": "A circuit contains a $10\\Omega$ resistor and a $5V$ battery connected in series. The diagram shows the complete circuit. What is the current flowing through the circuit?",
     "question_type": "MCQ",
-    "options": ["25π cm²", "10π cm²", "5π cm²", "15π cm²"],
+    "options": ["$0.5A$", "$1.0A$", "$2.0A$", "$5.0A$"],
     "question_number": "1",
     "has_image": true,
-    "image_description": "Circle with center O, radius r labeled, and point P marked on the circumference",
+    "image_description": "Simple series circuit with battery and resistor",
+    "diagram_json": [
+      {"x":100, "y":100, "id":"battery", "type":"line", "points":[[0,0],[0,60]], "strokeColor":"#000000", "strokeWidth":3},
+      {"x":100, "y":160, "id":"wire1", "type":"line", "points":[[0,0],[100,0]], "strokeColor":"#000000"},
+      {"x":200, "y":130, "id":"resistor", "type":"rectangle", "width":60, "height":30, "strokeColor":"#000000", "backgroundColor":"#fef3c7"},
+      {"x":260, "y":160, "id":"wire2", "type":"line", "points":[[0,0],[100,0]], "strokeColor":"#000000"},
+      {"x":360, "y":100, "id":"wire3", "type":"line", "points":[[0,0],[0,60]], "strokeColor":"#000000"},
+      {"x":360, "y":100, "id":"wire4", "type":"line", "points":[[0,0],[-260,0]], "strokeColor":"#000000"},
+      {"x":95, "y":120, "text":"5V", "type":"text", "fontSize":14, "fontFamily":1, "strokeColor":"#000000"},
+      {"x":215, "y":145, "text":"10Ω", "type":"text", "fontSize":14, "fontFamily":1, "strokeColor":"#000000"}
+    ],
+    "options_diagrams": null,
+    "is_continuation": false,
+    "spans_multiple_pages": false
+  }
+]
+
+EXAMPLE OUTPUT (Tree Question):
+[
+  {
+    "question_statement": "The binary tree shown has nodes labeled A through G. Which traversal gives the sequence D, B, E, A, F, C, G?",
+    "question_type": "MCQ",
+    "options": ["In-order", "Pre-order", "Post-order", "Level-order"],
+    "question_number": "2",
+    "has_image": true,
+    "image_description": "Binary tree with 7 nodes",
+    "diagram_json": [
+      {"x":200, "y":50, "id":"node-a", "type":"ellipse", "width":40, "height":40, "strokeColor":"#000000", "backgroundColor":"#e0f2fe"},
+      {"x":215, "y":70, "text":"A", "type":"text", "fontSize":16, "fontFamily":1, "strokeColor":"#000000"},
+      {"x":220, "y":90, "id":"line-a-b", "type":"line", "points":[[0,0],[-70,40]], "strokeColor":"#000000"},
+      {"x":130, "y":130, "id":"node-b", "type":"ellipse", "width":40, "height":40, "strokeColor":"#000000", "backgroundColor":"#e0f2fe"},
+      {"x":145, "y":150, "text":"B", "type":"text", "fontSize":16, "fontFamily":1, "strokeColor":"#000000"},
+      {"x":220, "y":90, "id":"line-a-c", "type":"line", "points":[[0,0],[70,40]], "strokeColor":"#000000"},
+      {"x":270, "y":130, "id":"node-c", "type":"ellipse", "width":40, "height":40, "strokeColor":"#000000", "backgroundColor":"#e0f2fe"},
+      {"x":285, "y":150, "text":"C", "type":"text", "fontSize":16, "fontFamily":1, "strokeColor":"#000000"}
+    ],
+    "options_diagrams": null,
     "is_continuation": false,
     "spans_multiple_pages": false
   }
 ]
 
 If no questions are found, return an empty array [].
-Focus on accuracy and completeness. Extract ONLY questions and options, NOT answers.`;
+Focus on accuracy and completeness. Extract ONLY questions and options, NOT answers. Generate proper Excalidraw JSON for ALL visual elements.`;
 
   try {
     const response = await callGeminiAPI(prompt, imageBase64, 0.1, 4000);
@@ -825,6 +883,31 @@ CRITICAL LATEX/KATEX REQUIREMENTS:
    - Vectors: $\\vec{v}$, $\\hat{v}$
 3. NEVER use malformed commands like \\backslashhat, \\ackslash, Δackslash, etc.
 4. Test: If $\\hat{\\beta}$ is correct, write it as $\\hat{\\beta}$ NOT as \\ackslashhat\\ackslashbeta
+
+CRITICAL INSTRUCTIONS FOR DIAGRAMS (EXCALIDRAW JSON):
+When your question requires a visual element (circuit, graph, tree, table, chemistry structure, mechanical diagram), you MUST generate Excalidraw JSON for it.
+
+Excalidraw Element Types:
+1. RECTANGLE: {"x":100, "y":50, "id":"rect-1", "type":"rectangle", "width":80, "height":60, "strokeColor":"#000000", "backgroundColor":"#e0f2fe"}
+2. ELLIPSE/CIRCLE: {"x":100, "y":50, "id":"circle-1", "type":"ellipse", "width":50, "height":50, "strokeColor":"#000000", "backgroundColor":"#fff"}
+3. LINE/ARROW: {"x":100, "y":50, "id":"line-1", "type":"line", "points":[[0,0],[100,50]], "strokeColor":"#000000", "strokeWidth":2}
+4. TEXT: {"x":100, "y":50, "text":"Label", "type":"text", "fontSize":16, "fontFamily":1, "strokeColor":"#000000"}
+
+Common Diagram Types:
+- CIRCUITS: Rectangles for resistors, circles for bulbs, lines for wires, text for values (10Ω, 5V)
+- CHEMISTRY: Circles for atoms, lines for bonds, text for elements (C, H, O, N)
+- GRAPHS: Lines for axes and curves, text for labels and values
+- TREES/GRAPHS: Circles for nodes, lines for edges, text for node labels
+- TABLES: Rectangles for cells, text for data
+- MECHANICAL: Shapes for components, lines for connections
+
+Positioning: Start x:50-100, y:50-100, space 50-100px apart, keep within 600x400 size
+
+When to Generate Diagrams:
+- Question needs visual representation: Set "diagram_json" field
+- Options have different diagrams: Set "options_diagrams" array with 4 elements (one per option)
+- Answer needs diagram: Set "answer_diagram" field
+- Solution needs step-by-step visual: Set "solution_diagram" field
 
 EXAM CONTEXT:
 - Exam: ${examName}
@@ -968,11 +1051,14 @@ ABSOLUTE JSON REQUIREMENTS (NON-NEGOTIABLE):
 8. Keep all text as ONE continuous line - use periods to separate steps
 9. Start output directly with [ and end with ] - nothing else
 
-CORRECT JSON FORMAT:
-[{"question_statement":"What is X?","question_type":"${questionType}",${questionType === 'MCQ' || questionType === 'MSQ' ? '"options":["Option A","Option B","Option C","Option D"],' : '"options":null,'}"answer":"${questionType === 'MCQ' ? 'A' : questionType === 'MSQ' ? 'A, C' : questionType === 'NAT' ? '42.5' : 'Detailed answer'}","solution":"Step 1. Do X. Step 2. Calculate Y. Step 3. Conclude Z.","is_wrong":false}]
+CORRECT JSON FORMAT (without diagrams):
+[{"question_statement":"What is X?","question_type":"${questionType}",${questionType === 'MCQ' || questionType === 'MSQ' ? '"options":["Option A","Option B","Option C","Option D"],' : '"options":null,'}"answer":"${questionType === 'MCQ' ? 'A' : questionType === 'MSQ' ? 'A, C' : questionType === 'NAT' ? '42.5' : 'Detailed answer'}","solution":"Step 1. Do X. Step 2. Calculate Y. Step 3. Conclude Z.","diagram_json":null,"options_diagrams":null,"answer_diagram":null,"solution_diagram":null,"is_wrong":false}]
+
+CORRECT JSON FORMAT (with circuit diagram in question):
+[{"question_statement":"A circuit has a 10Ω resistor and 5V battery in series as shown. Find current.","question_type":"MCQ","options":["0.5A","1A","2A","5A"],"answer":"A","solution":"Using Ohm's law: I=V/R. I=5/10=0.5A. Answer is A.","diagram_json":[{"x":100,"y":100,"id":"battery","type":"line","points":[[0,0],[0,60]],"strokeColor":"#000000","strokeWidth":3},{"x":100,"y":160,"id":"wire1","type":"line","points":[[0,0],[100,0]],"strokeColor":"#000000"},{"x":200,"y":130,"id":"resistor","type":"rectangle","width":60,"height":30,"strokeColor":"#000000","backgroundColor":"#fef3c7"},{"x":95,"y":120,"text":"5V","type":"text","fontSize":14,"fontFamily":1,"strokeColor":"#000000"}],"options_diagrams":null,"answer_diagram":null,"solution_diagram":null,"is_wrong":false}]
 
 If you find an issue with your generated question:
-[{"question_statement":"What is X?","question_type":"${questionType}",${questionType === 'MCQ' || questionType === 'MSQ' ? '"options":["Option A","Option B","Option C","Option D"],' : '"options":null,'}"answer":"${questionType === 'MCQ' ? 'A' : questionType === 'MSQ' ? 'A, C' : questionType === 'NAT' ? '42.5' : 'Detailed answer'}","solution":"Step 1. Do X. Step 2. Calculate Y. Step 3. Conclude Z.","is_wrong":true,"validation_reason":"Correct answer not in options"}]
+[{"question_statement":"What is X?","question_type":"${questionType}",${questionType === 'MCQ' || questionType === 'MSQ' ? '"options":["Option A","Option B","Option C","Option D"],' : '"options":null,'}"answer":"${questionType === 'MCQ' ? 'A' : questionType === 'MSQ' ? 'A, C' : questionType === 'NAT' ? '42.5' : 'Detailed answer'}","solution":"Step 1. Do X. Step 2. Calculate Y. Step 3. Conclude Z.","diagram_json":null,"options_diagrams":null,"answer_diagram":null,"solution_diagram":null,"is_wrong":true,"validation_reason":"Correct answer not in options"}]
 
 INCORRECT (will cause errors):
 \`\`\`json
